@@ -1,12 +1,15 @@
 package app
 
 import (
+	"flag"
 	"fmt"
+	"log"
 	"mini-marketplace/database/seeders"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/urfave/cli"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -35,9 +38,7 @@ type DBConfig struct {
 func (s *Server) Initialize(appConfig AppConfig, dbConfig DBConfig) {
 	fmt.Println("Welcome to ", appConfig.AppName)
 
-	s.InitializeDB(dbConfig)
 	s.InitializeRoutes()
-	seeders.DBSeed(s.DB)
 }
 
 func (s *Server) Run(addr string) {
@@ -70,7 +71,9 @@ func (s *Server) InitializeDB(dbConfig DBConfig) {
 	}
 
 	fmt.Println("Connected to database server")
+}
 
+func (s *Server) dbMigrate() {
 	for _, model := range RegisterModels() {
 		err := s.DB.Debug().AutoMigrate(model.Model)
 
@@ -80,6 +83,36 @@ func (s *Server) InitializeDB(dbConfig DBConfig) {
 	}
 
 	fmt.Println("Database migrated sucessfully")
+}
+
+func (s *Server) initCommands(appConfig AppConfig, dbConfig DBConfig) {
+	s.InitializeDB(dbConfig)
+
+	cmdApp := cli.NewApp()
+	cmdApp.Commands = []cli.Command{
+		{
+			Name: "db:migrate",
+			Action: func(c *cli.Context) error {
+				s.dbMigrate()
+				return nil
+			},
+		},
+		{
+			Name: "db:seed",
+			Action: func(c *cli.Context) error {
+				err := seeders.DBSeed(s.DB)
+				if err != nil {
+					log.Fatal(err)
+				}
+				return nil
+			},
+		},
+	}
+
+	err := cmdApp.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -110,6 +143,12 @@ func Run() {
 	dbConfig.DBPort = getEnv("DB_PORT", "3306")
 	dbConfig.DBDriver = getEnv("DB_DRIVER", "postgres")
 
-	server.Initialize(appConfig, dbConfig)
-	server.Run(appConfig.AppPort)
+	flag.Parse()
+	arg := flag.Arg(0)
+	if arg != "" {
+		server.initCommands(appConfig, dbConfig)
+	} else {
+		server.Initialize(appConfig, dbConfig)
+		server.Run(appConfig.AppPort)
+	}
 }
